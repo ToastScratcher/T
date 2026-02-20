@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Toast Drive | @2763JNJ</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        :root { --accent: #ff9f43; --bg: #0a0a0a; }
+        body { margin: 0; background: var(--bg); color: white; font-family: 'Arial Black', sans-serif; overflow: hidden; touch-action: none; }
+        canvas { display: none; background: #111; touch-action: none; }
+        .screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(0,0,0,0.98); z-index: 20; }
+        .card { background: #1e1e1e; padding: 30px; border-radius: 25px; width: 85%; max-width: 380px; text-align: center; border: 3px solid var(--accent); }
+        h1 { font-size: 2.5em; margin: 0; color: var(--accent); }
+        button { background: var(--accent); color: #000; border: none; padding: 15px; width: 100%; margin: 10px 0; border-radius: 12px; font-weight: 900; text-transform: uppercase; cursor: pointer; }
+        input { width: 100%; padding: 12px; margin: 8px 0; border-radius: 8px; border: 2px solid #333; background: #000; color: #fff; text-align: center; font-size: 1.1em; box-sizing: border-box; }
+        #hud { position: fixed; top: 15px; left: 15px; z-index: 10; background: rgba(0,0,0,0.85); padding: 12px; border-radius: 12px; font-family: monospace; border: 2px solid var(--accent); display: none; pointer-events: none; }
+        #controls { position: absolute; bottom: 30px; width: 100%; display: none; justify-content: space-between; padding: 0 25px; box-sizing: border-box; pointer-events: none; }
+        .btn-group { display: flex; gap: 15px; pointer-events: auto; }
+        .ctrl-btn { width: 75px; height: 75px; background: rgba(255,255,255,0.1); border: 2px solid rgba(255,255,255,0.4); border-radius: 20px; display: flex; align-items: center; justify-content: center; font-size: 28px; color: white; -webkit-user-select: none; }
+    </style>
+</head>
+<body>
+
+    <div id="hud">
+        🍞 <b>TOAST DRIVE</b><br>
+        👤 <span id="myTagName">---</span><br>
+        🏎️ <span id="speedVal">0</span> MPH<br>
+        🚔 <span id="wantedStatus" style="color:#0f0">CLEAR</span>
+    </div>
+
+    <div id="mainMenu" class="screen">
+        <div class="card">
+            <h1>TOAST DRIVE</h1>
+            <p style="color:#777; margin-bottom:20px;">@2763JNJ - WORLD UPDATED 🥀💀</p>
+            <input type="text" id="userNameInput" placeholder="ENTER YOUR TAG">
+            <button onclick="checkName('multiSelect')">Multiplayer</button>
+            <button onclick="checkName('solo')">Solo Session</button>
+        </div>
+    </div>
+
+    <div id="multiSelect" class="screen" style="display:none">
+        <div class="card">
+            <h2>LOBBY</h2>
+            <button onclick="createLobby()">Create Server</button>
+            <button onclick="showScreen('joinLobby')">Join Friends</button>
+            <button onclick="showScreen('mainMenu')" style="background:none; color:#777;">Back</button>
+        </div>
+    </div>
+
+    <div id="joinLobby" class="screen" style="display:none">
+        <div class="card">
+            <h2>JOIN GNG</h2>
+            <input type="number" id="joinIdInput" placeholder="4-DIGIT CODE">
+            <p id="errorMsg" style="color:red; font-size:0.8em; display:none; margin-top:5px;">INVALID FRIEND CODE 🥀💀</p>
+            <button id="joinBtn" onclick="initMultiplayer()">Connect</button>
+            <button onclick="showScreen('multiSelect')" style="background:none; color:#777;">Back</button>
+        </div>
+    </div>
+
+    <div id="createLobby" class="screen" style="display:none">
+        <div class="card">
+            <h2>SERVER LIVE</h2>
+            <p>Share with gng:</p>
+            <h1 id="displayId" style="background:#000; padding:10px; border-radius:10px; margin:15px 0;">----</h1>
+            <button onclick="startGame()">Start Drive</button>
+        </div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+    <div id="controls">
+        <div class="btn-group"><div class="ctrl-btn" id="lBtn">◀</div><div class="ctrl-btn" id="rBtn">▶</div></div>
+        <div class="btn-group"><div class="ctrl-btn" id="backBtn">REV</div><div class="ctrl-btn" id="fwdBtn">FWD</div></div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const CHUNK_SIZE = 4000;
+        let peer, conn, myName = "Player", myShortId = Math.floor(1000 + Math.random() * 9000).toString();
+        let player = { x: 2000, y: 2000, angle: 0, speed: 0, color: '#ff9f43', wanted: false };
+        let police = { x: 0, y: 0, active: false, angle: 0 };
+        let otherPlayers = {}, aiCars = [], chunks = {}, input = { fwd: false, back: false, left: false, right: false };
+        let lightState = 'GREEN', lightTimer = 0;
+
+        function checkName(target) {
+            const val = document.getElementById('userNameInput').value.trim();
+            if(!val) return alert("NAME YOURSELF GNG 🥀💀");
+            myName = val.toUpperCase();
+            document.getElementById('myTagName').innerText = myName;
+            if(target === 'solo') startGame(); else showScreen(target);
+        }
+
+        function createLobby() {
+            document.getElementById('displayId').innerText = myShortId;
+            peer = new Peer('toast-' + myShortId);
+            peer.on('open', () => showScreen('createLobby'));
+            peer.on('connection', (c) => { 
+                conn = c; 
+                conn.on('data', (data) => { otherPlayers[data.name] = data; });
+            });
+        }
+
+        function initMultiplayer() {
+            const id = document.getElementById('joinIdInput').value;
+            const btn = document.getElementById('joinBtn');
+            const error = document.getElementById('errorMsg');
+            error.style.display = 'none';
+            btn.innerText = "SEARCHING...";
+            peer = new Peer();
+            const connection = peer.connect('toast-' + id);
+            let timeout = setTimeout(() => {
+                error.style.display = 'block';
+                btn.innerText = "CONNECT";
+                peer.destroy();
+            }, 5000);
+            connection.on('open', () => {
+                clearTimeout(timeout);
+                conn = connection;
+                conn.on('data', (data) => { otherPlayers[data.name] = data; });
+                startGame();
+            });
+        }
+
+        function getChunk(cx, cy) {
+            const key = `${cx},${cy}`;
+            if (!chunks[key]) {
+                chunks[key] = {
+                    objs: [
+                        {type:'road', x: 1800, y: 0, w: 400, h: 4000},
+                        {type:'road', x: 0, y: 1800, w: 4000, h: 400},
+                        {type:'roundabout', x: 2000, y: 2000, r: 350},
+                        {type:'light', x: 1750, y: 1750},
+                        {type:'shop', n:'TESCO', c:'#005eb8', x:1400, y:1200, w:300, h:200},
+                        {type:'shop', n:'ASDA', c:'#78be20', x:2300, y:2400, w:300, h:200},
+                        {type:'sign', n: ["LONDON", "LEEDS", "BIRMINGHAM"][Math.abs(cx+cy)%3], x:2100, y:1600}
+                    ]
+                };
+                for(let i=0; i<3; i++) aiCars.push({ x: cx*CHUNK_SIZE+1950, y: cy*CHUNK_SIZE+(Math.random()*CHUNK_SIZE), speed: 5+Math.random()*3, color: "white" });
+            }
+            return chunks[key];
+        }
+
+        function drawCar(x, y, angle, color, nameTag, isPolice=false) {
+            ctx.save(); ctx.translate(x, y); 
+            ctx.fillStyle = "white"; ctx.font = "bold 16px Arial"; ctx.textAlign = "center";
+            ctx.fillText(nameTag, 0, -45);
+            ctx.rotate(angle);
+            ctx.fillStyle = "#111"; // Wheels
+            ctx.fillRect(-22, -16, 12, 7); ctx.fillRect(10, -16, 12, 7);
+            ctx.fillRect(-22, 9, 12, 7); ctx.fillRect(10, 9, 12, 7);
+            ctx.fillStyle = color; // Body
+            ctx.fillRect(-25, -12, 50, 24);
+            if(isPolice) {
+                ctx.fillStyle = Date.now() % 200 < 100 ? "red" : "blue";
+                ctx.fillRect(-5, -5, 10, 10);
+            }
+            ctx.fillStyle = "#000"; // Spoiler
+            ctx.fillRect(-30, -12, 8, 24);
+            ctx.fillStyle = "rgba(0,0,0,0.7)"; ctx.fillRect(0, -10, 20, 20);
+            ctx.restore();
+        }
+
+        const bind = (id, k) => {
+            const b = document.getElementById(id);
+            b.ontouchstart = (e) => { e.preventDefault(); input[k] = true; };
+            b.ontouchend = (e) => { e.preventDefault(); input[k] = false; };
+        };
+        bind('lBtn','left'); bind('rBtn','right'); bind('fwdBtn','fwd'); bind('backBtn','back');
+
+        function showScreen(id) {
+            document.querySelectorAll('.screen').forEach(s => s.style.display = 'none');
+            const el = document.getElementById(id);
+            if(el) el.style.display = 'flex';
+        }
+
+        function startGame() {
+            showScreen('none'); canvas.style.display = 'block';
+            document.getElementById('controls').style.display = 'flex';
+            document.getElementById('hud').style.display = 'block';
+            resize();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+        window.onresize = resize;
+
+        function gameLoop() {
+            lightTimer++;
+            lightState = lightTimer < 300 ? 'GREEN' : (lightTimer < 450 ? 'AMBER' : 'RED');
+            if(lightTimer > 800) lightTimer = 0;
+
+            let cx = Math.floor(player.x/CHUNK_SIZE), cy = Math.floor(player.y/CHUNK_SIZE);
+            let chunk = getChunk(cx, cy);
+            document.getElementById('speedVal').innerText = Math.floor(Math.abs(player.speed) * 12);
+            document.getElementById('wantedStatus').innerText = player.wanted ? "WANTED" : "CLEAR";
+            document.getElementById('wantedStatus').style.color = player.wanted ? "red" : "#0f0";
+
+            if(input.fwd) player.speed += 0.5;
+            if(input.back) player.speed -= 0.4;
+            player.speed *= 0.97;
+            player.angle += (input.left ? -0.08 : input.right ? 0.08 : 0) * (Math.abs(player.speed)/11);
+            
+            let nx = player.x + Math.cos(player.angle) * player.speed;
+            let ny = player.y + Math.sin(player.angle) * player.speed;
+
+            // Collisions & Lights
+            chunk.objs.forEach(o => {
+                if(o.type === 'shop') {
+                    let ox = cx*CHUNK_SIZE+o.x, oy = cy*CHUNK_SIZE+o.y;
+                    if(nx > ox && nx < ox+o.w && ny > oy && ny < oy+o.h) player.speed *= -0.4;
+                }
+                if(o.type === 'light' && lightState === 'RED') {
+                    let lx = cx*CHUNK_SIZE+o.x, ly = cy*CHUNK_SIZE+o.y;
+                    if(Math.sqrt((player.x-lx)**2 + (player.y-ly)**2) < 200 && Math.abs(player.speed) > 2) {
+                        player.wanted = true; if(!police.active) { police.active = true; police.x = player.x-500; police.y = player.y-500; }
+                    }
+                }
+            });
+
+            player.x = nx; player.y = ny;
+
+            if(police.active) {
+                let dx = player.x - police.x, dy = player.y - police.y;
+                let dist = Math.sqrt(dx*dx+dy*dy);
+                police.angle = Math.atan2(dy, dx);
+                police.x += Math.cos(police.angle) * 7.5; police.y += Math.sin(police.angle) * 7.5;
+                if(dist > 2000) { police.active = false; player.wanted = false; }
+                if(dist < 50) { player.speed = 0; police.active = false; player.wanted = false; player.x = 2000; player.y = 2000; alert("BUSTED GNG 🥀💀"); }
+            }
+
+            ctx.fillStyle = "#151515"; ctx.fillRect(0,0,canvas.width,canvas.height);
+            ctx.save(); ctx.translate(-player.x + canvas.width/2, -player.y + canvas.height/2);
+
+            for(let i=-1; i<=1; i++) {
+                for(let j=-1; j<=1; j++) {
+                    let c = getChunk(cx+i, cy+j); let ox = (cx+i)*CHUNK_SIZE, oy = (cy+j)*CHUNK_SIZE;
+                    c.objs.forEach(o => {
+                        ctx.fillStyle = (o.type==='road'||o.type==='roundabout') ? "#252525" : (o.c || "#0a1a0a");
+                        if(o.type==='roundabout') { ctx.beginPath(); ctx.arc(ox+o.x, oy+o.y, o.r, 0, 7); ctx.fill(); }
+                        else if(o.type==='light') {
+                            ctx.fillStyle="#000"; ctx.fillRect(ox+o.x, oy+o.y, 25, 70);
+                            ctx.fillStyle=lightState.toLowerCase(); ctx.beginPath(); ctx.arc(ox+o.x+12, oy+o.y+20, 8, 0, 7); ctx.fill();
+                        } else if(o.type==='sign') {
+                            ctx.fillStyle="#004d00"; ctx.fillRect(ox+o.x, oy+o.y, 180, 60);
+                            ctx.fillStyle="white"; ctx.font="bold 20px Arial"; ctx.fillText(o.n, ox+o.x+90, oy+o.y+40);
+                        } else { ctx.fillRect(ox+o.x, oy+o.y, o.w, o.h); ctx.fillStyle="white"; ctx.fillText(o.n||"", ox+o.x+20, oy+o.y+40); }
+                    });
+                }
+            }
+
+            aiCars.forEach(a => {
+                a.y += a.speed; if(a.y > player.y + 2500) a.y -= 5000;
+                drawCar(a.x, a.y, 1.57, "white", "NPC");
+            });
+
+            for(let id in otherPlayers) drawCar(otherPlayers[id].x, otherPlayers[id].y, otherPlayers[id].angle, otherPlayers[id].color, otherPlayers[id].name);
+            if(police.active) drawCar(police.x, police.y, police.angle, "white", "POLICE", true);
+            drawCar(player.x, player.y, player.angle, player.color, myName);
+
+            if(conn && conn.open) conn.send({x:player.x, y:player.y, angle:player.angle, color:player.color, name:myName});
+            ctx.restore(); requestAnimationFrame(gameLoop);
+        }
+    </script>
+</body>
+</html>
